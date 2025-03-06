@@ -62,6 +62,11 @@ const config: HardhatUserConfig = {
       accounts,
       chainId: 137,
     },
+    vana: {
+      url: 'https://rpc.vana.org',
+      accounts,
+      chainId: 1480,
+    },
   },
   etherscan: {
     apiKey: {
@@ -96,6 +101,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: 'https://api.berascan.com/api',
           browserURL: 'https://berascan.com/',
+        },
+      },
+      {
+        network: 'vana',
+        chainId: 1480,
+        urls: {
+          apiURL: 'https://vanascan.io/api/v2',
+          browserURL: 'https://vanascan.io/',
         },
       },
     ],
