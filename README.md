@@ -59,6 +59,15 @@ Calculating revenue for 0x15B5f5FE55704140ce5057d85c28f8b237c1Bc53 (1/1)
 Wrote results to beefy-revenue.csv
 ```
 
+### Calculate Network Revenue
+
+Calculates the revenue for a network on a specific protocol
+
+```bash
+# startBlock & endBlock are optional
+yarn ts-node ./scripts/calculateNetworkRevenue.ts --protocolId Beefy --networkId arbitrum-one
+```
+
 ### Referrer User Count
 
 Fetch the count of users referred for a specific protocol. If no network IDs or referrer IDs are passed, get the user count for all referrers across all supported networks for that protocol.
