@@ -14,6 +14,7 @@ contract DivviRegistry is
   AccessControlDefaultAdminRulesUpgradeable,
   UUPSUpgradeable
 {
+  // Data structs
   struct EntityData {
     bool exists;
     bool requiresApproval;
@@ -21,11 +22,33 @@ contract DivviRegistry is
     // this is upgrade safe as long as `EntityData` is only used in a mapping
   }
 
+  struct ReferralData {
+    address user;
+    address rewardsProvider;
+    address rewardsConsumer;
+    bytes32 txHash;
+    uint256 chainId;
+  }
+
+  enum ReferralStatus {
+    SUCCESS,
+    ENTITY_NOT_FOUND,
+    AGREEMENT_NOT_FOUND,
+    USER_ALREADY_REFERRED
+  }
+
   // Entities storage
   mapping(address => EntityData) private _entities;
 
   // Agreement storage
   mapping(bytes32 => bool) private _agreements; // keccak256(provider, consumer) => true (if agreement exists)
+
+  // Referral tracking
+  mapping(bytes32 => address) private _registeredReferrals; // keccak256(user, provider) => consumer
+
+  // Role constants
+  bytes32 public constant REFERRAL_REGISTRAR_ROLE =
+    keccak256('REFERRAL_REGISTRAR_ROLE');
 
   // Events
   event RewardsEntityRegistered(address indexed entity, bool requiresApproval);
@@ -36,6 +59,21 @@ contract DivviRegistry is
   event RewardsAgreementRegistered(
     address indexed rewardsProvider,
     address indexed rewardsConsumer
+  );
+  event ReferralRegistered(
+    address indexed user,
+    address indexed rewardsProvider,
+    address indexed rewardsConsumer,
+    uint256 chainId,
+    bytes32 txHash
+  );
+  event ReferralSkipped(
+    address indexed user,
+    address indexed rewardsProvider,
+    address indexed rewardsConsumer,
+    uint256 chainId,
+    bytes32 txHash,
+    ReferralStatus status
   );
 
   // Errors
@@ -151,6 +189,91 @@ contract DivviRegistry is
   }
 
   /**
+   * @notice Register multiple referrals in a single transaction
+   * @dev Requires REFERRAL_REGISTRAR_ROLE
+   * @param referrals Array of referral data to register
+   */
+  function batchRegisterReferral(
+    ReferralData[] calldata referrals
+  ) external onlyRole(REFERRAL_REGISTRAR_ROLE) {
+    for (uint256 i = 0; i < referrals.length; i++) {
+      ReferralData calldata referral = referrals[i];
+
+      // Process the referral and get the status
+      ReferralStatus status = _registerReferral(
+        referral.user,
+        referral.rewardsProvider,
+        referral.rewardsConsumer,
+        referral.txHash,
+        referral.chainId
+      );
+
+      // Emit appropriate event based on status
+      if (status == ReferralStatus.SUCCESS) {
+        emit ReferralRegistered(
+          referral.user,
+          referral.rewardsProvider,
+          referral.rewardsConsumer,
+          referral.chainId,
+          referral.txHash
+        );
+      } else {
+        emit ReferralSkipped(
+          referral.user,
+          referral.rewardsProvider,
+          referral.rewardsConsumer,
+          referral.chainId,
+          referral.txHash,
+          status
+        );
+      }
+    }
+  }
+
+  /**
+   * @notice Register a user as being referred to a rewards agreement
+   * @dev Internal function that returns status instead of emitting events
+   * @param user The address of the user being referred
+   * @param rewardsProvider The address of the rewards provider entity
+   * @param rewardsConsumer The address of the rewards consumer entity
+   * @param txHash The hash of the transaction that initiated the referral
+   * @param chainId The ID of the blockchain where the referral transaction occurred
+   * @return status The status of the referral registration
+   */
+  function _registerReferral(
+    address user,
+    address rewardsProvider,
+    address rewardsConsumer,
+    bytes32 txHash,
+    uint256 chainId
+  ) internal returns (ReferralStatus status) {
+    // Check if entities exist
+    if (
+      !_entities[rewardsProvider].exists || !_entities[rewardsConsumer].exists
+    ) {
+      return ReferralStatus.ENTITY_NOT_FOUND;
+    }
+
+    // Check if agreement exists
+    bytes32 agreementKey = keccak256(
+      abi.encodePacked(rewardsProvider, rewardsConsumer)
+    );
+    if (!_agreements[agreementKey]) {
+      return ReferralStatus.AGREEMENT_NOT_FOUND;
+    }
+
+    // Check if user is already referred to this provider
+    bytes32 referralKey = keccak256(abi.encodePacked(user, rewardsProvider));
+    if (_registeredReferrals[referralKey] != address(0)) {
+      return ReferralStatus.USER_ALREADY_REFERRED;
+    }
+
+    // Add referral
+    _registeredReferrals[referralKey] = rewardsConsumer;
+    return ReferralStatus.SUCCESS;
+  }
+
+  /**
    * @notice Check if an agreement exists between a consumer and provider
    * @param provider The provider entity address
    * @param consumer The consumer entity address
@@ -176,7 +299,7 @@ contract DivviRegistry is
   }
 
   /**
-   * @notice Check if an entity requires approval for agreements
+   * @notice Check if a rewards provider entity requires approval to form an agreement
    * @param entity The entity address to check
    * @return requiresApproval Whether the entity requires approval
    */
@@ -184,5 +307,32 @@ contract DivviRegistry is
     address entity
   ) external view returns (bool requiresApproval) {
     return _entities[entity].requiresApproval;
+  }
+
+  /**
+   * @notice Check if a user has been referred to a provider
+   * @param user The address of the user
+   * @param provider The address of the provider entity
+   * @return isReferred Whether the user has been referred to the provider
+   */
+  function isUserReferredToProvider(
+    address user,
+    address provider
+  ) external view returns (bool isReferred) {
+    return getReferringConsumer(user, provider) != address(0);
+  }
+
+  /**
+   * @notice Get the referring consumer for a user and provider
+   * @param user The address of the user
+   * @param provider The address of the provider entity
+   * @return consumer The address of the referring consumer, or address(0) if the user has not been referred to the provider
+   */
+  function getReferringConsumer(
+    address user,
+    address provider
+  ) public view returns (address consumer) {
+    bytes32 referralKey = keccak256(abi.encodePacked(user, provider));
+    return _registeredReferrals[referralKey];
   }
 }
