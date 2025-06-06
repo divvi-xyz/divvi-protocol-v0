@@ -56,6 +56,11 @@ export const calculateKpi: CalculateKpiFn = async ({
     NetworkId['celo-mainnet'],
     NetworkId['polygon-pos-mainnet'],
   ]
+  const networkIdToKpiName: Partial<Record<NetworkId, string>> = {
+    [NetworkId['base-mainnet']]: 'baseKpi',
+    [NetworkId['celo-mainnet']]: 'celoKpi',
+    [NetworkId['polygon-pos-mainnet']]: 'polygonKpi',
+  }
 
   const blockRanges = await Promise.all(
     networkIds.map((networkId) =>
@@ -80,8 +85,10 @@ export const calculateKpi: CalculateKpiFn = async ({
   )
 
   let totalTransactions = 0
-  for (const count of transactions) {
-    totalTransactions += count
-  }
-  return totalTransactions
+  const segmentedKpi: { [key: string]: number } = {}
+  transactions.forEach((item, index) => {
+    totalTransactions += item
+    segmentedKpi[networkIdToKpiName[networkIds[index]] ?? 'otherKpi'] = item
+  })
+  return { kpi: totalTransactions, segmentedKpi }
 }
