@@ -81,7 +81,7 @@
     "typescript": "^5.8.3",
     "unzipper": "^0.12.3",
     "viem": "^2.24.1",
-    "yargs": "^17.7.2"
+    "yargs": "^18.0.0"
   },
   "dependencies": {
     "@redis/client": "^5.5.6",
