@@ -4,13 +4,15 @@ import { NetworkId, ReferralEvent } from '../types'
 import { getHyperSyncClient } from '../utils'
 import { paginateQuery } from '../utils/hypersyncPagination'
 import { getReferrerIdFromTx } from '../calculateKpi/protocols/tetherV0/parseReferralTag/getReferrerIdFromTx'
-import { Hex } from 'viem'
+import { Address, Hex } from 'viem'
 import { RedisClientType } from '@redis/client'
 import Bottleneck from 'bottleneck'
+import { TransactionInfo } from '../calculateKpi/protocols/tetherV0/parseReferralTag/getTransactionInfo'
+import { getUserOperations } from '../calculateKpi/protocols/tetherV0/parseReferralTag/getUserOperations'
 
 const limiter = new Bottleneck({
-  reservoir: 200, // initial number of available requests
-  reservoirRefreshAmount: 200, // how many tokens to add on refresh
+  reservoir: 1000, // initial number of available requests
+  reservoirRefreshAmount: 1000, // how many tokens to add on refresh
   reservoirRefreshInterval: 60 * 1000, // refresh every 60 seconds
   minTime: 0, // no minimum time between requests
 })
@@ -32,22 +34,64 @@ async function findQualifyingNetworkReferralForUser({
     transactions: [{ from: [user] }],
     fieldSelection: {
       block: [BlockField.Timestamp],
-      transaction: [TransactionField.Hash],
+      transaction: [
+        TransactionField.Hash,
+        TransactionField.Input,
+        TransactionField.To,
+      ],
     },
-    fromBlock: startBlock ?? 0,
-    ...(endBlockExclusive && { toBlock: endBlockExclusive }),
+    fromBlock: startBlock,
+    toBlock: endBlockExclusive,
   }
   await paginateQuery(client, query, async (response) => {
     for (let i = 0; i < response.data.transactions.length; i++) {
       const tx = response.data.transactions[i]
       const block = response.data.blocks[i]
-      if (!tx.hash || !block.timestamp) {
+      if (!tx || !block) {
+        // was seeing weird behavior where response.data.blocks[i] was undefined, the last entry of blocks was missing??
         continue
       }
+
+      if (!tx.hash || !tx.input || !block.timestamp) {
+        continue
+      }
+
+      let transactionInfo: TransactionInfo | null = null
+      // Try to extract UserOperations to determine transaction type
+      const userOperations = getUserOperations({
+        to: tx.to as Address,
+        calldata: tx.input as Hex,
+        // TODO: convert hypersync logs to viem logs
+        logs: [],
+      })
+      if (userOperations.length > 0) {
+        // This is an Account Abstraction transaction
+        transactionInfo = {
+          hash: tx.hash as Hex,
+          type: 'transaction',
+          transactionType: 'account-abstraction-bundle',
+          from: user as Address,
+          to: user as Address, // does not matter, isn't used in getReferrerIdFromTx
+          calldata: tx.input as Hex,
+          userOperations,
+        }
+      } else {
+        // This is a regular transaction
+        transactionInfo = {
+          hash: tx.hash as Hex,
+          type: 'transaction',
+          transactionType: 'regular',
+          from: user as Address,
+          to: user as Address, // does not matter, isn't used in getReferrerIdFromTx
+          calldata: tx.input as Hex,
+        }
+      }
+
       const referrerId = await getReferrerIdFromTx(
         tx.hash as Hex,
         networkId,
         true,
+        transactionInfo,
       )
       if (referrerId !== null) {
         qualifyingNetworkReferral = {
@@ -87,7 +131,7 @@ export async function findQualifyingNetworkReferral({
   })
 
   const qualifyingReferrals: ReferralEvent[] = []
-  const batchSize = 20
+  const batchSize = 50
   const usersArray = Array.from(users)
   for (let i = 0; i < usersArray.length; i += batchSize) {
     const batch = usersArray.slice(i, i + batchSize)
