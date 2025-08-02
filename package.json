@@ -55,7 +55,7 @@
     "graphql-request": "^7.2.0",
     "redis": "^5.6.1",
     "viem": "^2.33.1",
-    "zod": "^3.25.76"
+    "zod": "^4.0.14"
   },
   "devDependencies": {
     "@bgd-labs/aave-address-book": "^4.18.0",
